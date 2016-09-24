@@ -1,89 +1,106 @@
-# docker-mariadb
+This is a port of panubo/mariadb-galera with `utf8mb4` as the default charset.
 
-This is a port of hauptmedia/docker-mariadb combined with the official mariadb docker image.
-Since mariadb 10.1 includes Galera modules, they are no longer needed to install separately as hauptmedia/docker-mariadb.
+# Docker Container for MariaDB Galera Cluster
 
+We hope that this container will not be required in the future pending the integration better Galera support in the official container.
+eg [PR 24](https://github.com/docker-library/mariadb/pull/24/files).
 
+This container uses the entrypoint modifications similar to the ones by [Kristian Klausen](https://github.com/klausenbusk/mariadb/blob/78df6f06732897bee0a69ee6332884f9cb1f5fbd/10.1/docker-entrypoint.sh) to provide (better) Galera support for the offcial `mariadb:10.1` container.
 
-## Available environment configuration
+Also included is [Galera Arbitrator](http://galeracluster.com/documentation-webpages/arbitrator.html) (aka `garbd`) which allows you to maintain quorum with a two node cluster.
 
-| Variable | Default value | Description |
-| -------- | ------------- | ----------- |
-| PORT | 3306 | Specify the MySQL Service Port |
-| MAX_CONNECTIONS | 100 | Specified the maximum of parallel connections allowed to use the service |
-| MYSQL_ROOT_PASSWORD | | If set, the root password will be set to this password (only if data-dir was non existent on startup) |
-| MYSQL_DATABASE | | If set, this database will be created (only if data-dir was non existent on startup) |
-| MYSQL_USER | | If set, this user will be created (only if data-dir was no existent on startup) |
-| MYSQL_PASSWORD | | If set, this $MYSQL_USER will be created with this password |
-| LOG_BIN | | Base filename for binary logs (will enable binary logs) |
-| LOG_BIN_INDEX | | Location of the log-bin index file |
-| MAX_ALLOWED_PACKET | 16M | The maximum size of one packet |
-| QUERY_CACHE_SIZE | 16M | The amount of memory allocated for caching query results |
-| INNODB_LOG_FILE_SIZE | 48M | Size in bytes of each log file in the log group |
-| QUERY_CACHE_TYPE | 1 | Set the query cache type 0=OFF, 1=ON, 2=DEMAND |
-| SYNC_BINLOG | 0 | Controls the number of binary log commit groups to collect before synchronizing the binary log to disk. When sync_binlog=0, the binary log is never synchronized to disk, and when sync_binlog is set to a value greater than 0 this number of binary log commit groups is periodically synchronized to disk. When sync_binlog=1, all transactions are synchronized to the binary log before they are committed |
-| INNODB_BUFFER_POOL_SIZE | 128M | The size in bytes of the buffer pool, the memory area where InnoDB caches table and index data |
-| INNODB_FLUSH_METHOD | | Defines the method used to flush data to the InnoDB data files and log files, which can affect I/O throughput |
-| INNODB_OLD_BLOCKS_TIME | 1000 | Non-zero values protect against the buffer pool being filled up by data that is referenced only for a brief period, such as during a full table scan. Increasing this value offers more protection against full table scans interfering with data cached in the buffer pool. |
-| INNODB_FLUSH_LOG_AT_TRX_COMMIT | 1 | Controls the balance between strict ACID compliance for commit operations, and higher performance that is possible when commit-related I/O operations are rearranged and done in batches. You can achieve better performance by changing the default value, but then you can lose up to a second of transactions in a crash. |
+## Usage
 
-### Galera specific settings
+### Environment Arguments
 
-| Variable | Default value | Description |
-| -------- | ------------- | ----------- |
-| GALERA | | If set the galera extension will be enabled |
-| CLUSTER_NAME | | Unique Name that identified the Galera Cluster |
-| NODE_NAME | | Unique Node name that identified this node instance |
-| CLUSTER_ADDRESS | | gcomm:// style resource identifier that provides topology information about the Galera Cluster |
-| REPLICATION_PASSWORD | | Password for the replication user which will be needed to allow state transfers using xtrabackupv2 method |
+- `WSREP_NODE_ADDRESS` - IP or domain of host interface eg `WSREP_NODE_ADDRESS=10.0.0.1`
+- `WSREP_CLUSTER_ADDRESS` - List of cluster nodes and ports eg `WSREP_CLUSTER_ADDRESS=gcomm://10.0.0.1:4567,10.0.0.2:4567,10.0.0.3:4567`
+- `WSREP_CLUSTER_NAME` - Default `my_wsrep_cluster`
 
-## Running MariaDB in Standalone Mode
+### Running Garbd
 
-```bash
-docker run -i -t --rm \
--e TIMEZONE=Europe/Berlin \
--e MYSQL_ROOT_PASSWORD=securepassword \
-lucidfrontier45/mariadb:10.1
+Garbd is available. Just specify `garbd` as the command.
+
 ```
-## Running MariaDB in Galera Cluster Mode
-
-For known limitations have a look at https://mariadb.com/kb/en/mariadb/mariadb-galera-cluster-known-limitations
-
-
-### Initializing a new cluster
-
-```bash
-docker run -i -t --rm \
--e TIMEZONE=Europe/Berlin \
--e MYSQL_ROOT_PASSWORD=test \
--e REPLICATION_PASSWORD=test \
--e GALERA=On \
--e NODE_NAME=node1 \
--e CLUSTER_NAME=test \
--e CLUSTER_ADDRESS=gcomm:// \
-lucidfrontier45/mariadb:10.1 --wsrep-new-cluster
+docker run -d --net host --name galera-garbd \
+  -e WSREP_CLUSTER_ADDRESS=$WSREP_CLUSTER_ADDRESS \
+  panubo/mariadb-galera \
+    garbd
 ```
 
-### Joining a node to the cluster
+### Bootstrapping the cluster
 
-```bash
-docker run -i -t --rm \
--e TIMEZONE=Europe/Berlin \
--e MYSQL_ROOT_PASSWORD=test \
--e REPLICATION_PASSWORD=test \
--e GALERA=On \
--e NODE_NAME=node2 \
--e CLUSTER_NAME=test \
--e CLUSTER_ADDRESS=gcomm://ipOrHost1,ipOrHost2,ipOrHost3 \
-lucidfrontier45/mariadb:10.1
+Node 1:
+
+```
+docker run -d --net host --name galera \
+  -e WSREP_NODE_ADDRESS=$WSREP_NODE_ADDRESS \
+  -e WSREP_CLUSTER_ADDRESS=$WSREP_CLUSTER_ADDRESS \
+  -e MYSQL_ROOT_PASSWORD={{ mysql_root_password }} \
+  -p 3306:3306 \
+  -p 4567:4567/udp \
+  -p 4567-4568:4567-4568 \
+  -p 4444:4444 \
+  -v /mnt/data/galera.service/mysql:/var/lib/mysql:Z \
+  panubo/mariadb-galera \
+    --wsrep-new-cluster
 ```
 
-Please note: if you don't specify the timezone the server will run with UTC time
+Node 2-N:
 
-## Recover strategies
+Create empty mysql dir to [skip database initialisation](https://github.com/docker-library/mariadb/pull/57). (Kludge!)
 
-To fix a split brain in a failed cluster make sure that only one node remains in the cluster and run
+```
+mkdir -p /mnt/data/galera.service/mysql/mysql
+```
 
-`SET GLOBAL wsrep_provider_options='pc.bootstrap=true';`
+Start the container normally (without `--wsrep-new-cluster`).
 
-For more information about recovering a galera cluster have a look at https://www.percona.com/blog/2014/09/01/galera-replication-how-to-recover-a-pxc-cluster/
+```
+docker run -d --net host --name galera \
+  -e WSREP_NODE_ADDRESS=$WSREP_NODE_ADDRESS \
+  -e WSREP_CLUSTER_ADDRESS=$WSREP_CLUSTER_ADDRESS \
+  -p 3306:3306 \
+  -p 4567:4567/udp \
+  -p 4567-4568:4567-4568 \
+  -p 4444:4444 \
+  -v /mnt/data/galera.service/mysql:/var/lib/mysql:Z \
+  panubo/mariadb-galera
+```
+
+## Recovery
+
+Recovery when quorum is lost can often be simply recovered:
+
+Stop on all nodes. EG:
+
+```
+systemctl stop galera.service
+```
+
+Start node with most complete / recent data set with `--wsrep-new-cluster` argument. EG:
+
+```
+docker run -d --net host --name galera-init \
+  -e WSREP_NODE_ADDRESS=$WSREP_NODE_ADDRESS \
+  -e WSREP_CLUSTER_ADDRESS=$WSREP_CLUSTER_ADDRESS \
+  -e MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD \
+  -p 3307:3306 \
+  -p 4567:4567/udp \
+  -p 4567-4568:4567-4568 \
+  -p 4444:4444 \
+  -v /mnt/data/galera.service/mysql:/var/lib/mysql:Z \
+  panubo/mariadb-galera \
+    --wsrep-new-cluster
+```
+
+Bring up other nodes normally. Eg
+
+```
+systemctl start galera.service
+```
+# Gotchas
+
+1. Whilst it isn't strictly necessary to use the host network (`--net host`), there seems to be an issue (bug?) whereby Galera gets both the host and the (duplicated) Docker network IP assigned to the node. This causes issues when multiple nodes fail and attempt to rejoin the cluster.
+
+2. Garbd requires an explicit port if it blows up with `"Exception in creating receive loop."` See [issue 312](https://github.com/codership/galera/issues/312).
