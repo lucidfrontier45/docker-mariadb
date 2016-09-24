@@ -2,8 +2,8 @@ FROM		mariadb:10.1
 MAINTAINER	Shiqiao Du <lucidfrontier.45@gmail.com>
 
 # add configuration
-ADD		conf.d/utf8.cnf /etc/mysql/conf.d/utf8.cnf
-ADD		conf.d/galera.cnf /etc/mysql/conf.d/galera.cnf
+COPY		conf.d/utf8.cnf /etc/mysql/conf.d/utf8.cnf
+COPY		conf.d/galera.cnf /etc/mysql/conf.d/galera.cnf
 
 # 3306 - MySQL client connections
 # 4567 - Galera Cluster replication traffic, multicast replication uses both udp & tcp
